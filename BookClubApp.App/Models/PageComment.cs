@@ -1,7 +1,10 @@
+using SQLite;
+
 namespace BookClubApp.App.Models;
 
 public class PageComment
 {
+    [PrimaryKey]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
     public string BookId { get; set; } = string.Empty;
