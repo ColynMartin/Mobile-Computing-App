@@ -1,6 +1,7 @@
 # Book Club App
 
 ## Description
+
 Book Club App is a mobile application for readers to discuss digital
 books together. The planned features include uploading a book, commenting
 on individual pages, and replying to other readers' comments without
@@ -11,9 +12,11 @@ offline, with changes synchronized when an internet connection is
 available.
 
 ## Domain Entity: PageComment
+
 PageComment represents a comment attached to a specific book and page.
 
 Properties:
+
 - Id: Unique identifier for the comment.
 - BookId: Identifier of the book being discussed.
 - PageNumber: Page the comment refers to.
@@ -25,27 +28,38 @@ Properties:
 - ParentCommentId: Optional reference to another comment for replies.
 
 ## Week 1 – Planning & Setup
+
 - [x] Choose domain entity: PageComment.
 - [x] Set up MAUI project.
-- [ ] Set up SQLite.
-- [ ] Set up server or mock API.
+- [x] Set up SQLite.
+- [x] Set up server or mock API.
 - [ ] Complete README with app name, description, and Week 1 progress.
 - [ ] Submit screenshot of rendered README and zipped .git file to Canvas.
 
 ## Current App Status
+
 The app currently displays the default MAUI starter screen.
 The PageComment model has been added. Book uploading, page discussions,
 offline storage, and synchronization are planned features and are not
 implemented yet.
 
+-> Comments can now be saved and reloaded using SQLite. Saved comments will remain after closing and opening the app.
+
+-> An ASP.NET Core API Server was created and added to the solution. Microsoft Dev Tunnels for the server to be accessed from other devices. The server and dev tunnels were tested and verified in a browser.
+
 ## Planned Synchronization Behavior
+
 Synchronization must preserve separate comments added to the same page
 online or offline. Conflicting edits to the same comment must be detected
 and handled without silently discarding either version. Offline comments
 must remain stored locally until the server confirms they were saved.
 
 ## Development Environment
+
 - .NET SDK: 11.0.100-preview.7.26381.103
 - Android target: net11.0-android
 - Editor: Visual Studio Code
 - Test device: MAUI android 35 emulator
+- API framework: ASP.NET Core
+- Using Microsoft Dev Tunnels
+- Local storage; SQLite
