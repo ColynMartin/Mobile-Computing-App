@@ -33,15 +33,12 @@ Properties:
 - [x] Set up MAUI project.
 - [x] Set up SQLite.
 - [x] Set up server or mock API.
-- [ ] Complete README with app name, description, and Week 1 progress.
+- [x]  Complete README with app name, description, and Week 1 progress.
 - [ ] Submit screenshot of rendered README and zipped .git file to Canvas.
 
 ## Current App Status
 
-The app currently displays the default MAUI starter screen.
-The PageComment model has been added. Book uploading, page discussions,
-offline storage, and synchronization are planned features and are not
-implemented yet.
+The app currently displays a sample page discussion screen where comments can be saved and reloaded using SQLite. Two comments were saved on the same page and remained after closing and reopening the app. Book uploads, shared discussions, and online/offline synchronization are not yet implemented.
 
 -> Comments can now be saved and reloaded using SQLite. Saved comments will remain after closing and opening the app.
 
