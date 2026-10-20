@@ -54,6 +54,15 @@
                                     FontAttributes="Bold" />
 
                                 <Label Text="{Binding CommentText}" />
+                                <HorizontalStackLayout Spacing="12">
+    <Button
+        Text="Edit"
+        Clicked="OnEditClicked" />
+
+    <Button
+        Text="Delete"
+        Clicked="OnDeleteClicked" />
+</HorizontalStackLayout>
 
                                 <Label
                                     Text="{Binding CreatedAt,

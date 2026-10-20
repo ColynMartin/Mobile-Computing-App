@@ -22,4 +22,7 @@ public class PageComment
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public string? ParentCommentId { get; set; }
+
+    // Keep a deletion record for future synchronization.
+    public bool IsDeleted { get; set; } = false;
 }

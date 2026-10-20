@@ -86,6 +86,82 @@ public partial class MainPage : ContentPage
             ? "No saved comments on this page yet."
             : $"Comments saved on this device: {comments.Count}";
     }
+	private async void OnEditClicked(object? sender, EventArgs e)
+{
+    if (sender is not Button button ||
+        button.BindingContext is not PageComment comment)
+        return;
+
+    await RunOperationAsync(async () =>
+    {
+        string? text = await DisplayPromptAsync(
+            "Edit comment",
+            "Update your comment:",
+            accept: "Save",
+            cancel: "Cancel",
+            initialValue: comment.CommentText);
+
+        if (text is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            StatusLabel.Text = "Comment text cannot be empty.";
+            return;
+        }
+
+        if (text.Trim() == comment.CommentText)
+        {
+            StatusLabel.Text = "No changes were made.";
+            return;
+        }
+
+        await database.UpdateCommentAsync(comment.Id, text);
+
+        try
+        {
+            await LoadCommentsAsync();
+            StatusLabel.Text = "Comment updated and change recorded.";
+        }
+        catch (Exception ex)
+        {
+            StatusLabel.Text =
+                $"Comment updated, but reloading failed: {ex.Message}";
+        }
+    });
+}
+
+private async void OnDeleteClicked(object? sender, EventArgs e)
+{
+    if (sender is not Button button ||
+        button.BindingContext is not PageComment comment)
+        return;
+
+    await RunOperationAsync(async () =>
+    {
+        bool confirmed = await DisplayAlertAsync(
+            "Delete comment?",
+            "Remove this comment from the page?",
+            "Delete",
+            "Cancel");
+
+        if (!confirmed)
+            return;
+
+        await database.DeleteCommentAsync(comment.Id);
+
+        try
+        {
+            await LoadCommentsAsync();
+            StatusLabel.Text = "Comment deleted and change recorded.";
+        }
+        catch (Exception ex)
+        {
+            StatusLabel.Text =
+                $"Comment deleted, but reloading failed: {ex.Message}";
+        }
+    });
+}
 
     // Prevent overlapping operations and display any errors.
     private async Task RunOperationAsync(Func<Task> operation)
