@@ -132,6 +132,25 @@ public class CommentDatabase
             .ToListAsync();
     }
 
+    // Updates local db records IsSynced once synced with server.
+    public async Task MarkChangesSyncedAsync(List<string> changeIds)
+    {
+        var connection = await database.Value;
+
+        foreach (var id in changeIds)
+        {
+            var change = await connection.Table<CommentChange>()
+                .Where(change => change.Id == id)
+                .FirstOrDefaultAsync();
+
+            if (change is not null)
+            {
+                change.IsSynced = true;
+                await connection.UpdateAsync(change);
+            }
+        }
+    }
+
     private static PageComment GetActiveComment(
         SQLiteConnection connection, string commentId)
     {

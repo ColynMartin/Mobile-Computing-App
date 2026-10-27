@@ -19,6 +19,7 @@ public static class MauiProgram
             });
 
         builder.Services.AddSingleton<CommentDatabase>();
+        builder.Services.AddSingleton<PushSyncService>();
         builder.Services.AddTransient<MainPage>();
 
 #if DEBUG

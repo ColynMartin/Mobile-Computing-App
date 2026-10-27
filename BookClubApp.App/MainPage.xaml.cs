@@ -10,11 +10,14 @@ public partial class MainPage : ContentPage
 
     private const string SampleBookId = "sample-book";
     private const int SamplePageNumber = 1;
+    private readonly PushSyncService pushSyncService;
+    private CancellationTokenSource? syncCancellation;
 
-    public MainPage(CommentDatabase database)
+    public MainPage(CommentDatabase database, PushSyncService pushSyncService)
     {
         InitializeComponent();
         this.database = database;
+        this.pushSyncService = pushSyncService;
     }
 
     // Read saved comments whenever the page opens.
@@ -22,6 +25,8 @@ public partial class MainPage : ContentPage
     {
         base.OnAppearing();
         await RunOperationAsync(LoadCommentsAsync);
+        syncCancellation = new CancellationTokenSource();
+        _ = RunAutomaticSyncAsync(syncCancellation.Token);
     }
 
     private async void OnSaveClicked(object? sender, EventArgs e)
@@ -189,5 +194,26 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
             ReloadButton.IsEnabled = true;
             CommentEditor.IsEnabled = true;
         }
+    }
+
+    private async Task RunAutomaticSyncAsync(CancellationToken token)
+    {
+        try
+        {
+            await pushSyncService.StartAutomaticSyncAsync(token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Synchronization stopped when leaving the page.
+        }
+    }
+
+    protected override void OnDisappearing()
+    {
+        syncCancellation?.Cancel();
+        syncCancellation?.Dispose();
+        syncCancellation = null;
+
+        base.OnDisappearing();
     }
 }
