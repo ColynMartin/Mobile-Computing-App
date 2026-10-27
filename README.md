@@ -34,7 +34,7 @@ Properties:
 - [x] Set up MAUI project.
 - [x] Set up SQLite.
 - [x] Set up server or mock API.
-- [x]  Complete README with app name, description, and Week 1 progress.
+- [x] Complete README with app name, description, and Week 1 progress.
 - [x] Submit screenshot of rendered README and zipped .git file to Canvas.
 
 ## Current App Status
@@ -114,9 +114,46 @@ The before and after tables show the changed comment text and its new Update rec
 
 Book uploads, shared discussions, online/offline synchronization, and conflict resolution remain planned for later development.
 
-### Week 3 - Push Sync
-- [ ] Implement push endpoint
-- [ ] Send pending changes
-- [ ] Clear pending changes on success
-- [ ] Adding Week 3 progress documentation to README.md
+## Week 3 - Push Sync
+
+- [x] Implement push endpoint
+- [x] Send pending changes
+- [x] Clear pending changes on success
+- [x] Add Week 3 progress documentation to README.md
 - [ ] Submit the rendered README screenshot and required ZIP to Canvas.
+
+### Implement Push Endpoint
+
+The /pushChanges endpoint receives changes in comments and saves them to the server database. The app connects to the server through Microsoft Dev Tunnels.
+
+Both server tables were empty before syncing.
+
+![Server comments before sync](<docs/week3/Week 3 Server Comments Before.png>)
+![Server changes before sync](<docs/week3/Week 3 Server Changes Before.png>)
+
+### Send Pending Changes
+
+While the discussion page is open, the app checks for pending changes every 10 seconds. Changes remain stored locally if the server is unavailable.
+
+Comments were created, edited, and deleted while the server was stopped. Before syncing, there were 7 pending changes with IsSynced set to 0 (indicating it has not synced yet).
+
+![Pending device changes before sync](<docs/week3/Week 3 Device Changes Before Sync.png>)
+
+After the server was restarted and the API link was corrected, all changes were received and processed.
+
+The server receives and processes changes in the same database transaction. Each received change has ReceivedAt and ProcessedAt values.
+
+![Server changes received and processed](<docs/week3/Week 3 Server Changes Received.png>)
+
+The server stored comment records and remained marked IsDeleted = 1.
+The row with CommentText "update" is from earlier testing. It is marked as deleted and is not part of the example.
+
+![Server comments after sync](<docs/week3/Week 3 Server Comments After Sync.png>)
+
+### Clear Pending Changes on Success
+
+After the server confirms that changes were saved, the app sets their IsSynced flag to true. The change records remain in the local database but are no longer pending.
+
+All local change records had IsSynced set to 1 after syncing.
+
+![Device changes marked as synced](<docs/week3/Week 3 Device Changes After Sync.png>)

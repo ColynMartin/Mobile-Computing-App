@@ -23,7 +23,7 @@ public class PushSyncService
             return 0;
 
         var response = await client.PostAsJsonAsync(
-            "http://localhost:5240/pushChanges", pending);
+            "https://mkrdl10t-5050.use2.devtunnels.ms/pushChanges", pending); 
 
         response.EnsureSuccessStatusCode();
 
