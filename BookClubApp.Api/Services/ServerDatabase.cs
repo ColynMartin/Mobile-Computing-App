@@ -35,4 +35,9 @@ public class ServerDatabase
     {
         await database.Value;
     }
+
+    public async Task<SQLiteAsyncConnection> GetConnectionAsync()
+    {
+        return await database.Value;
+    }
 }
