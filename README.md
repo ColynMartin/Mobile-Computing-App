@@ -72,7 +72,7 @@ must remain stored locally until the server confirms they were saved.
 - [x] Capture database tables before and after the same change.
 - [x] Include change-tracking evidence.
 - [x] Document Week 2 progress while retaining Week 1 progress.
-- [ ] Submit the rendered README screenshot and required ZIP to Canvas.
+- [x] Submit the rendered README screenshot and required ZIP to Canvas.
 
 ### Change Tracking
 
@@ -113,3 +113,10 @@ The before and after tables show the changed comment text and its new Update rec
 ### Remaining Project Work
 
 Book uploads, shared discussions, online/offline synchronization, and conflict resolution remain planned for later development.
+
+### Week 3 - Push Sync
+- [ ] Implement push endpoint
+- [ ] Send pending changes
+- [ ] Clear pending changes on success
+- [ ] Adding Week 3 progress documentation to README.md
+- [ ] Submit the rendered README screenshot and required ZIP to Canvas.
