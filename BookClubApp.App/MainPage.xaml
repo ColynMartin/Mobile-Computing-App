@@ -18,7 +18,7 @@
                 Text="Sample Book — Page 1"
                 FontSize="18" />
 
-            <Label Text="Local comments only. Sharing and sync will come later." />
+            <Label Text="Comments are saved on this device. Download and apply changes from the server." />
 
             <Editor
                 x:Name="CommentEditor"
@@ -35,6 +35,16 @@
                 x:Name="ReloadButton"
                 Text="Reload saved comments"
                 Clicked="OnReloadClicked" />
+
+            <Button
+                x:Name="DownloadButton"
+                Text="Download changes"
+                Clicked="OnDownloadClicked" />
+
+            <Button
+                x:Name="ApplyButton"
+                Text="Apply downloaded changes"
+                Clicked="OnApplyClicked" />
 
             <Label
                 x:Name="StatusLabel"

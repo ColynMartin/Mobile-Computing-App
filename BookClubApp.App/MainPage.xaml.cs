@@ -1,5 +1,6 @@
 ﻿using BookClubApp.App.Models;
 using BookClubApp.App.Services;
+using Microsoft.Maui.ApplicationModel;
 
 namespace BookClubApp.App;
 
@@ -11,13 +12,15 @@ public partial class MainPage : ContentPage
     private const string SampleBookId = "sample-book";
     private const int SamplePageNumber = 1;
     private readonly PushSyncService pushSyncService;
+    private readonly PullSyncService pullSyncService;
     private CancellationTokenSource? syncCancellation;
 
-    public MainPage(CommentDatabase database, PushSyncService pushSyncService)
+    public MainPage(CommentDatabase database, PushSyncService pushSyncService, PullSyncService pullSyncService)
     {
         InitializeComponent();
         this.database = database;
         this.pushSyncService = pushSyncService;
+        this.pullSyncService = pullSyncService;
     }
 
     // Read saved comments whenever the page opens.
@@ -25,8 +28,34 @@ public partial class MainPage : ContentPage
     {
         base.OnAppearing();
         await RunOperationAsync(LoadCommentsAsync);
-        syncCancellation = new CancellationTokenSource();
-        _ = RunAutomaticSyncAsync(syncCancellation.Token);
+        
+        #if ANDROID
+        // Request local network permission on Android API 37 and later
+        if (OperatingSystem.IsAndroidVersionAtLeast(37))
+        {
+            try
+            {
+                var status = await Permissions.RequestAsync<LocalNetworkPermission>();
+                
+                if (status != PermissionStatus.Granted)
+                {
+                    StatusLabel.Text = "Local network permission is needed to sync with the server.";
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusLabel.Text = $"Could not request local network permission: {ex.Message}";
+                return;
+            }
+        }
+        #endif
+
+            if (syncCancellation is null)
+            {
+                syncCancellation = new CancellationTokenSource();
+                _ = RunAutomaticSyncAsync(syncCancellation.Token);
+            }
     }
 
     private async void OnSaveClicked(object? sender, EventArgs e)
@@ -78,6 +107,43 @@ public partial class MainPage : ContentPage
     private async void OnReloadClicked(object? sender, EventArgs e)
     {
         await RunOperationAsync(LoadCommentsAsync);
+    }
+
+    private async void OnDownloadClicked(object? sender, EventArgs e)
+    {
+        await RunOperationAsync(async () =>
+        {
+            int downloadedCount = await pullSyncService.DownloadChangesAsync();
+            StatusLabel.Text = $"Downloaded comments: {downloadedCount}. Tap Apply downloaded changes";
+        });
+    }
+
+    private async void OnApplyClicked(object? sender, EventArgs e)
+    {
+        await RunOperationAsync(async () =>
+        {
+            var state = await database.GetPullSyncStateAsync();
+
+            if (state.PendingSyncTimeUtc is null)
+            {
+                StatusLabel.Text = "Download changes before applying. No changes were applied.";
+                return;
+            }
+
+            int count = await pullSyncService.ApplyChangesAsync();
+
+            try
+            {
+                await LoadCommentsAsync();
+                StatusLabel.Text = $"Downloaded comments applied: {count}.";
+            }
+            catch (Exception ex)
+            {
+                StatusLabel.Text =
+                    $"Downloaded comments applied, but reloading failed: {ex.Message}";
+            }
+            
+        });
     }
 
     private async Task LoadCommentsAsync()
@@ -177,6 +243,8 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
         busy = true;
         SaveButton.IsEnabled = false;
         ReloadButton.IsEnabled = false;
+        DownloadButton.IsEnabled = false;
+        ApplyButton.IsEnabled = false;
         CommentEditor.IsEnabled = false;
 
         try
@@ -192,6 +260,8 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
             busy = false;
             SaveButton.IsEnabled = true;
             ReloadButton.IsEnabled = true;
+            DownloadButton.IsEnabled = true;
+            ApplyButton.IsEnabled = true;
             CommentEditor.IsEnabled = true;
         }
     }
