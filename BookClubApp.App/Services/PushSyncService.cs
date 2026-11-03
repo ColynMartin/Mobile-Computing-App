@@ -1,60 +1,97 @@
-using BookClubApp.App.Services;
+using System.Net.Http;
 using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace BookClubApp.App.Services;
 
 public class PushSyncService
 {
     private readonly CommentDatabase database;
-    private readonly HttpClient client = new();
+    private readonly HttpClient client;
+    private readonly SemaphoreSlim pushLock = new(1, 1);
 
-    public PushSyncService(CommentDatabase database)
+    public PushSyncService(
+        CommentDatabase database,
+        HttpClient client)
     {
         this.database = database;
+        this.client = client;
     }
 
-    public async Task<int> PushChangesAsync()
+    public async Task<int> PushChangesAsync(
+        CancellationToken cancellationToken = default)
     {
-        var changes = await database.GetChangesAsync();
-        var pending = changes.Where(change => !change.IsSynced).ToList();
+        await pushLock.WaitAsync(cancellationToken);
 
-        if (pending.Count == 0)
-            return 0;
+        try
+        {
+            var changes = await database.GetChangesAsync();
 
-        var response = await client.PostAsJsonAsync(
-            "https://mkrdl10t-5050.use2.devtunnels.ms/pushChanges", pending); 
+            var pending = changes
+                .Where(change => !change.IsSynced)
+                .ToList();
 
-        response.EnsureSuccessStatusCode();
+            if (pending.Count == 0)
+                return 0;
 
-        var result = await response.Content.ReadFromJsonAsync<PushResult>();
+            using var response = await client.PostAsJsonAsync(
+                "pushChanges",
+                pending,
+                cancellationToken);
 
-        if (result is null)
-            throw new InvalidOperationException("No confirmation received.");
+            response.EnsureSuccessStatusCode();
 
-        await database.MarkChangesSyncedAsync(result.ProcessedChangeIds);
+            var result = await response.Content
+                .ReadFromJsonAsync<PushResult>(
+                    cancellationToken: cancellationToken);
 
-        return result.ProcessedChangeIds.Count;
+            if (result?.ProcessedChangeIds is null)
+            {
+                throw new InvalidOperationException(
+                    "No confirmation received.");
+            }
+
+            // Only acknowledge changes included in this request.
+            var sentIds = pending
+                .Select(change => change.Id)
+                .ToHashSet();
+
+            var confirmedIds = result.ProcessedChangeIds
+                .Where(id => sentIds.Contains(id))
+                .Distinct()
+                .ToList();
+
+            await database.MarkChangesSyncedAsync(confirmedIds);
+
+            return confirmedIds.Count;
+        }
+        finally
+        {
+            pushLock.Release();
+        }
     }
 
-    public async Task StartAutomaticSyncAsync(CancellationToken cancellationToken)
+    public async Task StartAutomaticSyncAsync(
+        CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await PushChangesAsync();
+                await PushChangesAsync(cancellationToken);
             }
             catch (HttpRequestException)
             {
                 // Server unavailable. Try again later.
             }
-            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
+                when (!cancellationToken.IsCancellationRequested)
             {
                 // Request timed out. Try again later.
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+            await Task.Delay(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
         }
     }
 
