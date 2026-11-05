@@ -120,7 +120,7 @@ Book uploads, shared discussions, online/offline synchronization, and conflict r
 - [x] Send pending changes
 - [x] Clear pending changes on success
 - [x] Add Week 3 progress documentation to README.md
-- [ ] Submit the rendered README screenshot and required ZIP to Canvas.
+- [x] Submit the rendered README screenshot and required ZIP to Canvas.
 
 ### Implement Push Endpoint
 
@@ -157,3 +157,43 @@ After the server confirms that changes were saved, the app sets their IsSynced f
 All local change records had IsSynced set to 1 after syncing.
 
 ![Device changes marked as synced](<docs/week3/Week 3 Device Changes After Sync.png>)
+
+## Week 4 - Pull Sync
+
+- [x] Implement pull endpoint
+- [x] Apply incoming changes
+- [x] Handle deletes
+- [x] Add Week 4 progress documentation to README.md
+- [x] Submit the rendered README screenshot and required ZIP to Canvas.
+
+### Implement Pull Endpoint
+
+The /pullChanges endpoint retrieves comments from the server database. During the first pull, it returns all comments, including deleted records. Subsequent pulls use the last synchronization timestamp to retrieve newer changes.
+
+The app provides a Download Changes button to retrieve server records and an Apply Downloaded Changes button to process them locally.
+
+### Apply Incoming Changes
+
+Before syncing, the server database contained 3 comments from previous testing. Two were marked as deleted, and one was active.
+
+![Server comments before pull](docs/week4/01_Server_Before_Pull.png)
+
+The local database contained 3 different comments that had been created on the device.
+
+![Device comments before pull](docs/week4/02_Local_Before_Pull.png)
+
+The Download Changes button retrieves the server records and temporarily stores them in the IncomingComment table. These records are not added to the PageComment table until the user applies them.
+
+After downloading, the Apply Downloaded Changes button processes the incoming records and updates the local PageComment table.
+
+The local database increased from 3 records to 6 records. All 3 original comments remained, and the 3 server comments were successfully added.
+
+![Device comments after applying changes](docs/week4/03_Local_After_Apply.png)
+
+### Handle Deletes
+
+Deleted comments are synchronized using the IsDeleted flag rather than permanently removing their records.
+
+The server returned two deleted comments along with the active comment. These records were successfully transferred to the local database.
+
+Deleted comments remain stored for synchronization purposes but are excluded from the visible discussion.
