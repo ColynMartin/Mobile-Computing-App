@@ -153,6 +153,8 @@ public partial class MainPage : ContentPage
 
         BindableLayout.SetItemsSource(CommentsLayout, comments);
 
+        await LoadConflictsAsync();
+
         StatusLabel.Text = comments.Count == 0
             ? "No saved comments on this page yet."
             : $"Comments saved on this device: {comments.Count}";
@@ -245,6 +247,9 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
         ReloadButton.IsEnabled = false;
         DownloadButton.IsEnabled = false;
         ApplyButton.IsEnabled = false;
+        SyncButton.IsEnabled = false;
+        ConflictsLayout.IsEnabled = false;
+        CommentsLayout.IsEnabled = false;
         CommentEditor.IsEnabled = false;
 
         try
@@ -262,6 +267,9 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
             ReloadButton.IsEnabled = true;
             DownloadButton.IsEnabled = true;
             ApplyButton.IsEnabled = true;
+            SyncButton.IsEnabled = true;
+            ConflictsLayout.IsEnabled = true;
+            CommentsLayout.IsEnabled = true;
             CommentEditor.IsEnabled = true;
         }
     }
@@ -270,7 +278,19 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
     {
         try
         {
-            await pushSyncService.StartAutomaticSyncAsync(token);
+            while (!token.IsCancellationRequested)
+            {
+                await RunOperationAsync(async () =>
+                {
+                    int sent = await pushSyncService.PushChangesAsync(token);
+                    await LoadConflictsAsync();
+
+                    if (sent > 0)
+                        StatusLabel.Text = $"Automatically synced changes: {sent}.";
+                });
+
+                await Task.Delay(TimeSpan.FromSeconds(10), token);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {

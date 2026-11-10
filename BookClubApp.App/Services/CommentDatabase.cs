@@ -33,6 +33,9 @@ public partial class CommentDatabase
         await connection.ExecuteAsync(
             "UPDATE PageComment SET Version = 0 WHERE Version IS NULL");
 
+        await connection.ExecuteAsync(
+            "UPDATE CommentChange SET IsSuperseded = 0 WHERE IsSuperseded IS NULL");
+
         return connection;
     }
 
@@ -140,6 +143,16 @@ public partial class CommentDatabase
             .ToListAsync();
     }
 
+    public async Task<List<CommentChange>> GetPendingChangesAsync()
+    {
+        var connection = await database.Value;
+
+        // Send dependent edits in the order they were saved on this device.
+        return await connection.QueryAsync<CommentChange>(
+            "SELECT * FROM CommentChange " +
+            "WHERE IsSynced = 0 AND IsSuperseded = 0 ORDER BY rowid");
+    }
+
     // Mark changes as synced after the server confirms them.
     public async Task MarkChangesSyncedAsync(List<string> changeIds)
     {
@@ -217,7 +230,8 @@ public partial class CommentDatabase
                 bool hasPendingChanges = transaction.Table<CommentChange>()
                     .Where(change =>
                         change.CommentId == comment.Id &&
-                        change.IsSynced == false)
+                        change.IsSynced == false &&
+                        change.IsSuperseded == false)
                     .Count() > 0;
 
                 if (hasPendingChanges)
@@ -283,7 +297,8 @@ public partial class CommentDatabase
                 bool hasPendingChanges = transaction.Table<CommentChange>()
                     .Where(change =>
                         change.CommentId == item.CommentId &&
-                        change.IsSynced == false)
+                        change.IsSynced == false &&
+                        change.IsSuperseded == false)
                     .Count() > 0;
 
                 if (hasPendingChanges ||
@@ -337,7 +352,7 @@ public partial class CommentDatabase
             """
             SELECT *
             FROM CommentChange
-            WHERE CommentId = ? AND IsSynced = 0
+            WHERE CommentId = ? AND IsSynced = 0 AND IsSuperseded = 0
             ORDER BY rowid DESC
             LIMIT 1
             """,

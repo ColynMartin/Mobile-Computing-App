@@ -91,6 +91,8 @@ public class PushChangesController : ControllerBase
                     (existing.CommentId != change.CommentId ||
                      existing.Operation != change.Operation ||
                      existing.BaseVersion != change.BaseVersion ||
+                     (existing.PreviousChangeId is not null &&
+                      existing.PreviousChangeId != change.PreviousChangeId) ||
                      existing.SnapshotJson != change.SnapshotJson))
                 {
                     response.Results.Add(new PushChangeResult
@@ -99,7 +101,8 @@ public class PushChangesController : ControllerBase
                         CommentId = change.CommentId,
                         Outcome = "Conflict",
                         Reason = "This change ID was already used " +
-                                 "with different content."
+                                 "with different content.",
+                        ServerComment = transaction.Find<PageComment>(change.CommentId)
                     });
 
                     continue;
@@ -142,7 +145,7 @@ public class PushChangesController : ControllerBase
                     : JsonSerializer.Serialize(stored);
 
                 string? conflictReason =
-                    GetConflictReason(change, stored);
+                    GetConflictReason(change, stored, transaction);
 
                 var received = existing ?? new ReceivedCommentChange
                 {
@@ -150,6 +153,7 @@ public class PushChangesController : ControllerBase
                     CommentId = change.CommentId,
                     Operation = change.Operation,
                     BaseVersion = change.BaseVersion,
+                    PreviousChangeId = change.PreviousChangeId,
                     ChangedAt = change.ChangedAt,
                     SnapshotJson = change.SnapshotJson,
                     ReceivedAt = DateTime.UtcNow
@@ -206,7 +210,8 @@ public class PushChangesController : ControllerBase
 
     private static string? GetConflictReason(
         ReceivedCommentChange change,
-        PageComment? stored)
+        PageComment? stored,
+        SQLite.SQLiteConnection transaction)
     {
         if (change.Operation == "Create")
         {
@@ -226,15 +231,33 @@ public class PushChangesController : ControllerBase
         if (stored is null)
             return "The comment no longer exists on the server.";
 
-        if (change.BaseVersion is null)
+        int? expectedVersion = change.BaseVersion;
+
+        if (!string.IsNullOrWhiteSpace(change.PreviousChangeId))
+        {
+            var previous = transaction.Table<CommentAuditEntry>()
+                .Where(entry => entry.ChangeId == change.PreviousChangeId)
+                .FirstOrDefault();
+
+            if (previous is null || previous.CommentId != change.CommentId ||
+                previous.Outcome != "Accepted" || previous.ServerVersionAfter is null)
+            {
+                return "The previous local edit was not accepted. Review this comment.";
+            }
+
+            // Consecutive offline edits follow the version accepted for their predecessor.
+            expectedVersion = previous.ServerVersionAfter;
+        }
+
+        if (expectedVersion is null)
         {
             return "This older change has no base version " +
                    "and requires review.";
         }
 
-        if (change.BaseVersion != stored.Version)
+        if (expectedVersion != stored.Version)
         {
-            return $"This edit used version {change.BaseVersion}, " +
+            return $"This edit used version {expectedVersion}, " +
                    $"but the server has version {stored.Version}.";
         }
 

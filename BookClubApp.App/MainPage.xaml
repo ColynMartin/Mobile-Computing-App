@@ -42,6 +42,11 @@
                 Clicked="OnDownloadClicked" />
 
             <Button
+                x:Name="SyncButton"
+                Text="Sync now"
+                Clicked="OnSyncClicked" />
+
+            <Button
                 x:Name="ApplyButton"
                 Text="Apply downloaded changes"
                 Clicked="OnApplyClicked" />
@@ -49,6 +54,15 @@
             <Label
                 x:Name="StatusLabel"
                 Text="Loading comments..." />
+
+            <Label
+                x:Name="ConflictStatusLabel"
+                FontAttributes="Bold"
+                Text="No unresolved conflicts." />
+
+            <VerticalStackLayout
+                x:Name="ConflictsLayout"
+                Spacing="12" />
 
             <VerticalStackLayout
                 x:Name="CommentsLayout"

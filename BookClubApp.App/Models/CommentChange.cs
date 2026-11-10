@@ -24,4 +24,7 @@ public class CommentChange
     public string SnapshotJson { get; set; } = string.Empty;
 
     public bool IsSynced { get; set; } = false;
+
+    // Keep discarded edits in history without sending them again.
+    public bool IsSuperseded { get; set; } = false;
 }

@@ -10,7 +10,7 @@ public partial class CommentDatabase
         List<CommentChange> sentChanges,
         PushChangesResponse response)
     {
-        if (response.Results is null)
+        if (response.Results is null || response.ProcessedChangeIds is null)
         {
             throw new InvalidOperationException(
                 "The server did not return detailed sync results.");
@@ -68,6 +68,17 @@ public partial class CommentDatabase
                 "The server did not return an outcome for every change.");
         }
 
+        var acceptedIds = response.Results
+            .Where(result => result.Outcome == "Accepted")
+            .Select(result => result.ChangeId)
+            .ToHashSet();
+
+        if (!acceptedIds.SetEquals(response.ProcessedChangeIds))
+        {
+            throw new InvalidOperationException(
+                "The server's acknowledgments do not match its accepted results.");
+        }
+
         var connection = await database.Value;
 
         await connection.RunInTransactionAsync(transaction =>
@@ -89,8 +100,28 @@ public partial class CommentDatabase
                     }
                 }
 
-                if (result.Outcome != "Conflict")
+                if (result.Outcome == "Accepted")
+                {
+                    var change = transaction.Find<CommentChange>(sent.Id);
+
+                    if (change is not null)
+                    {
+                        change.IsSynced = true;
+                        transaction.Update(change);
+                    }
+
+                    var local = transaction.Find<PageComment>(sent.CommentId);
+
+                    // Preserve newer local text while remembering the server version.
+                    if (local is not null && result.ServerComment is not null &&
+                        result.ServerComment.Version > local.Version)
+                    {
+                        local.Version = result.ServerComment.Version;
+                        transaction.Update(local);
+                    }
+
                     continue;
+                }
 
                 var existingConflict =
                     transaction.Find<CommentConflict>(result.ChangeId);

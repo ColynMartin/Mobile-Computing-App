@@ -32,11 +32,10 @@ public class PushSyncService
                 .Select(conflict => conflict.CommentId)
                 .ToHashSet();
 
-            var changes = await database.GetChangesAsync();
+            var changes = await database.GetPendingChangesAsync();
 
             var pending = changes
                 .Where(change =>
-                    !change.IsSynced &&
                     !blockedCommentIds.Contains(change.CommentId))
                 .ToList();
 
@@ -81,9 +80,24 @@ public class PushSyncService
                 .Distinct()
                 .ToList();
 
-            await database.MarkChangesSyncedAsync(confirmedIds);
-
             return confirmedIds.Count;
+        }
+        finally
+        {
+            pushLock.Release();
+        }
+    }
+
+    public async Task ResolveConflictAsync(
+        string changeId, bool keepLocal, string? expectedLocalSnapshot)
+    {
+        // A response already in flight must finish before resolving its conflict.
+        await pushLock.WaitAsync();
+
+        try
+        {
+            await database.ResolveConflictAsync(
+                changeId, keepLocal, expectedLocalSnapshot);
         }
         finally
         {
