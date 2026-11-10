@@ -22,10 +22,16 @@ public class CommentDatabase
         await connection.CreateTableAsync<CommentChange>();
         await connection.CreateTableAsync<IncomingComment>();
         await connection.CreateTableAsync<PullSyncState>();
+        await connection.CreateTableAsync<CommentAuditEntry>();
+        await connection.CreateTableAsync<CommentConflict>();
 
         // Keep older comments visible after adding IsDeleted.
         await connection.ExecuteAsync(
             "UPDATE PageComment SET IsDeleted = 0 WHERE IsDeleted IS NULL");
+
+        // Initialize the version field for existing local records.
+        await connection.ExecuteAsync(
+            "UPDATE PageComment SET Version = 0 WHERE Version IS NULL");
 
         return connection;
     }
