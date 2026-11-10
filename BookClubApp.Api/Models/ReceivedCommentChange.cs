@@ -11,9 +11,9 @@ public class ReceivedCommentChange
 
     public string Operation { get; set; } = string.Empty;
 
-    // Server version this change was based on.
-    // Null means an older change did not record a version.
     public int? BaseVersion { get; set; }
+
+    public string? PreviousChangeId { get; set; }
 
     public DateTime ChangedAt { get; set; }
 

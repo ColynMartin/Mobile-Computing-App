@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace BookClubApp.App.Services;
 
-public class CommentDatabase
+public partial class CommentDatabase
 {
     private readonly Lazy<Task<SQLiteAsyncConnection>> database =
         new(CreateDatabaseAsync);
@@ -331,11 +331,25 @@ public class CommentDatabase
         PageComment comment,
         string operation)
     {
+        // Find the most recently queued, unsynced edit for this comment.
+        // Database insertion order avoids relying on the device clock.
+        var previousChange = connection.Query<CommentChange>(
+            """
+            SELECT *
+            FROM CommentChange
+            WHERE CommentId = ? AND IsSynced = 0
+            ORDER BY rowid DESC
+            LIMIT 1
+            """,
+            comment.Id)
+            .FirstOrDefault();
+
         var change = new CommentChange
         {
             CommentId = comment.Id,
             Operation = operation,
             BaseVersion = comment.Version,
+            PreviousChangeId = previousChange?.Id,
             ChangedAt = comment.UpdatedAt,
             SnapshotJson = JsonSerializer.Serialize(comment),
             IsSynced = false

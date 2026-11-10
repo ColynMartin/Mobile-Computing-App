@@ -12,15 +12,16 @@ public class CommentChange
     // Create, Update, or Delete.
     public string Operation { get; set; } = string.Empty;
 
+    // Server version this edit was based on.
+    public int? BaseVersion { get; set; }
+
+    // Previous pending local edit to this same comment.
+    public string? PreviousChangeId { get; set; }
+
     public DateTime ChangedAt { get; set; } = DateTime.UtcNow;
 
     // Preserve the comment's state when the change happened.
     public string SnapshotJson { get; set; } = string.Empty;
 
     public bool IsSynced { get; set; } = false;
-
-    // Server version this change was based on.
-    // Null means an older change did not record a version.
-    public int? BaseVersion { get; set; }
-
 }
