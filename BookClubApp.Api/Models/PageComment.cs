@@ -19,4 +19,8 @@ public class PageComment
 
     public string? ParentCommentId { get; set; }
     public bool IsDeleted { get; set; }
+
+    // Server version used to detect conflicting edits.
+    public int Version { get; set; } = 0;
+
 }

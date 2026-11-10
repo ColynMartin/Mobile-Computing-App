@@ -18,4 +18,9 @@ public class CommentChange
     public string SnapshotJson { get; set; } = string.Empty;
 
     public bool IsSynced { get; set; } = false;
+
+    // Server version this change was based on.
+    // Null means an older change did not record a version.
+    public int? BaseVersion { get; set; }
+
 }

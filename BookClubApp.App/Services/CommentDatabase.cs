@@ -329,6 +329,7 @@ public class CommentDatabase
         {
             CommentId = comment.Id,
             Operation = operation,
+            BaseVersion = comment.Version,
             ChangedAt = comment.UpdatedAt,
             SnapshotJson = JsonSerializer.Serialize(comment),
             IsSynced = false

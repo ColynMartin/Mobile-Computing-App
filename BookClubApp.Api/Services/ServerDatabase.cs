@@ -27,6 +27,12 @@ public class ServerDatabase
 
         await connection.CreateTableAsync<PageComment>();
         await connection.CreateTableAsync<ReceivedCommentChange>();
+        await connection.CreateTableAsync<CommentAuditEntry>();
+
+        // Existing server comments start at version zero.
+        // Future accepted changes will advance their versions.
+        await connection.ExecuteAsync(
+            "UPDATE PageComment SET Version = 0 WHERE Version IS NULL");
 
         return connection;
     }
