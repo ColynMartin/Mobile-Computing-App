@@ -40,7 +40,10 @@ public class PushSyncService
                 .ToList();
 
             if (pending.Count == 0)
+            {
+                await PushAuditEntriesAsync(cancellationToken);
                 return 0;
+            }
 
             using var response = await client.PostAsJsonAsync(
                 "pushChanges",
@@ -80,12 +83,39 @@ public class PushSyncService
                 .Distinct()
                 .ToList();
 
+            await PushAuditEntriesAsync(cancellationToken);
+
             return confirmedIds.Count;
         }
         finally
         {
             pushLock.Release();
         }
+    }
+
+    private async Task PushAuditEntriesAsync(CancellationToken cancellationToken)
+    {
+        var pending = await database.GetPendingAuditEntriesAsync();
+
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        using var response = await client.PostAsJsonAsync("pushAuditEntries", pending, cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+
+        var acknowledgedIds = await response.Content.ReadFromJsonAsync<List<string>>(cancellationToken: cancellationToken);
+        var sentIds = pending.Select(entry => entry.Id).ToHashSet();
+
+        // Only mark entries as synced after validating the server's reply
+        if (acknowledgedIds is null || acknowledgedIds.Count != sentIds.Count || !sentIds.SetEquals(acknowledgedIds))
+        {
+            throw new InvalidOperationException("The server did not acknowledge the expected audit entries.");
+        }
+
+        await database.MarkAuditEntriesSyncedAsync(acknowledgedIds);
     }
 
     public async Task ResolveConflictAsync(

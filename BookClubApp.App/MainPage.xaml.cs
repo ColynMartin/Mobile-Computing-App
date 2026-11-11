@@ -8,6 +8,7 @@ public partial class MainPage : ContentPage
 {
     private readonly CommentDatabase database;
     private bool busy;
+    private readonly SemaphoreSlim operationLock = new(1, 1);
 
     private const string SampleBookId = "sample-book";
     private const int SamplePageNumber = 1;
@@ -243,17 +244,21 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
             return;
 
         busy = true;
-        SaveButton.IsEnabled = false;
-        ReloadButton.IsEnabled = false;
-        DownloadButton.IsEnabled = false;
-        ApplyButton.IsEnabled = false;
-        SyncButton.IsEnabled = false;
-        ConflictsLayout.IsEnabled = false;
-        CommentsLayout.IsEnabled = false;
-        CommentEditor.IsEnabled = false;
+        bool lockTaken = false;
 
         try
         {
+            SaveButton.IsEnabled = false;
+            ReloadButton.IsEnabled = false;
+            DownloadButton.IsEnabled = false;
+            ApplyButton.IsEnabled = false;
+            SyncButton.IsEnabled = false;
+            ConflictsLayout.IsEnabled = false;
+            CommentsLayout.IsEnabled = false;
+            CommentEditor.IsEnabled = false;
+
+            await operationLock.WaitAsync();
+            lockTaken = true;
             await operation();
         }
         catch (Exception ex)
@@ -262,6 +267,9 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
         }
         finally
         {
+            if (lockTaken)
+                operationLock.Release();
+
             busy = false;
             SaveButton.IsEnabled = true;
             ReloadButton.IsEnabled = true;
@@ -276,20 +284,46 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
 
     private async Task RunAutomaticSyncAsync(CancellationToken token)
     {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         try
         {
-            while (!token.IsCancellationRequested)
+            while (await timer.WaitForNextTickAsync(token))
             {
-                await RunOperationAsync(async () =>
+                if (busy)
+                    continue;
+
+                bool lockTaken = await operationLock.WaitAsync(0, token);
+
+                if (!lockTaken)
+                    continue;
+
+                try
                 {
                     int sent = await pushSyncService.PushChangesAsync(token);
-                    await LoadConflictsAsync();
+                    token.ThrowIfCancellationRequested();
 
-                    if (sent > 0)
-                        StatusLabel.Text = $"Automatically synced changes: {sent}.";
-                });
+                    if (!busy)
+                    {
+                        await LoadConflictsAsync();
 
-                await Task.Delay(TimeSpan.FromSeconds(10), token);
+                        if (sent > 0)
+                            StatusLabel.Text = $"Automatically synced changes: {sent}.";
+                    }
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    // Synchronization stopped when leaving the page.
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    if (!busy && !token.IsCancellationRequested)
+                        StatusLabel.Text = $"Automatic sync failed: {ex.Message}";
+                }
+                finally
+                {
+                    operationLock.Release();
+                }
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)

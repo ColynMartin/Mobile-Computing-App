@@ -110,7 +110,7 @@ public class PushChangesController : ControllerBase
 
                 var previousAudit = transaction
                     .Table<CommentAuditEntry>()
-                    .Where(entry => entry.ChangeId == change.Id)
+                    .Where(entry => entry.ChangeId == change.Id && (entry.Outcome == "Accepted" || entry.Outcome == "Conflict"))
                     .FirstOrDefault();
 
                 // Return the original outcome without processing it twice.
@@ -236,7 +236,7 @@ public class PushChangesController : ControllerBase
         if (!string.IsNullOrWhiteSpace(change.PreviousChangeId))
         {
             var previous = transaction.Table<CommentAuditEntry>()
-                .Where(entry => entry.ChangeId == change.PreviousChangeId)
+                .Where(entry => entry.ChangeId == change.PreviousChangeId && entry.Outcome == "Accepted")
                 .FirstOrDefault();
 
             if (previous is null || previous.CommentId != change.CommentId ||

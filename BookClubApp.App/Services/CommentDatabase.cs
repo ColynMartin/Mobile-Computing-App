@@ -23,6 +23,7 @@ public partial class CommentDatabase
         await connection.CreateTableAsync<IncomingComment>();
         await connection.CreateTableAsync<PullSyncState>();
         await connection.CreateTableAsync<CommentAuditEntry>();
+        await connection.CreateTableAsync<SyncedAuditEntry>();
         await connection.CreateTableAsync<CommentConflict>();
 
         // Keep older comments visible after adding IsDeleted.
