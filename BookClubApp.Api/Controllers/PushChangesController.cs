@@ -23,75 +23,283 @@ public class PushChangesController : ControllerBase
         if (changes is null || changes.Count == 0)
             return BadRequest("No changes were provided.");
 
-        var connection = await database.GetConnectionAsync();
-        var processedIds = new List<string>();
+        var snapshots = new Dictionary<string, PageComment>();
 
+        // Validate the entire request before changing the database.
         foreach (var change in changes)
         {
-            if (string.IsNullOrWhiteSpace(change.Id) ||
+            if (change is null ||
+                string.IsNullOrWhiteSpace(change.Id) ||
                 string.IsNullOrWhiteSpace(change.CommentId) ||
-                !new[] { "Create", "Update", "Delete" }.Contains(change.Operation))
+                string.IsNullOrWhiteSpace(change.SnapshotJson) ||
+                !new[] { "Create", "Update", "Delete" }
+                    .Contains(change.Operation) ||
+                change.BaseVersion < 0)
             {
                 return BadRequest("Invalid change information.");
             }
 
+            if (snapshots.ContainsKey(change.Id))
+                return BadRequest("Duplicate change IDs in this request.");
+
+            PageComment? comment;
+
             try
             {
-                var comment = JsonSerializer.Deserialize<PageComment>(
+                comment = JsonSerializer.Deserialize<PageComment>(
                     change.SnapshotJson);
-
-                if (comment is null || comment.Id != change.CommentId)
-                    return BadRequest("Invalid comment snapshot.");
             }
             catch (JsonException)
             {
                 return BadRequest("Invalid JSON snapshot.");
             }
+
+            if (comment is null ||
+                comment.Id != change.CommentId ||
+                string.IsNullOrWhiteSpace(comment.BookId) ||
+                comment.PageNumber < 1)
+            {
+                return BadRequest("Invalid comment snapshot.");
+            }
+
+            bool isDelete = change.Operation == "Delete";
+
+            if (comment.IsDeleted != isDelete)
+                return BadRequest("Operation and deletion flag do not match.");
+
+            if (!isDelete &&
+                string.IsNullOrWhiteSpace(comment.CommentText))
+            {
+                return BadRequest("Comment text cannot be empty.");
+            }
+
+            snapshots.Add(change.Id, comment);
         }
+
+        var connection = await database.GetConnectionAsync();
+        var response = new PushChangesResponse();
 
         await connection.RunInTransactionAsync(transaction =>
         {
             foreach (var change in changes)
             {
-                var existing = transaction.Find<ReceivedCommentChange>(change.Id);
+                var existing = transaction
+                    .Find<ReceivedCommentChange>(change.Id);
 
-                if (existing is not null)
+                // A retry must contain the same original change.
+                if (existing is not null &&
+                    (existing.CommentId != change.CommentId ||
+                     existing.Operation != change.Operation ||
+                     existing.BaseVersion != change.BaseVersion ||
+                     (existing.PreviousChangeId is not null &&
+                      existing.PreviousChangeId != change.PreviousChangeId) ||
+                     existing.SnapshotJson != change.SnapshotJson))
                 {
-                    if (existing.ProcessedAt is not null)
-                        processedIds.Add(change.Id);
+                    response.Results.Add(new PushChangeResult
+                    {
+                        ChangeId = change.Id,
+                        CommentId = change.CommentId,
+                        Outcome = "Conflict",
+                        Reason = "This change ID was already used " +
+                                 "with different content.",
+                        ServerComment = transaction.Find<PageComment>(change.CommentId)
+                    });
 
                     continue;
                 }
 
-                var comment = JsonSerializer.Deserialize<PageComment>(
-                    change.SnapshotJson)!;
+                var previousAudit = transaction
+                    .Table<CommentAuditEntry>()
+                    .Where(entry => entry.ChangeId == change.Id && (entry.Outcome == "Accepted" || entry.Outcome == "Conflict"))
+                    .FirstOrDefault();
 
-                var received = new ReceivedCommentChange
+                // Return the original outcome without processing it twice.
+                if (previousAudit is not null)
+                {
+                    AddAuditResult(response, previousAudit);
+                    continue;
+                }
+
+                // Preserve acknowledgments from the earlier sync system.
+                if (existing?.ProcessedAt is not null)
+                {
+                    response.ProcessedChangeIds.Add(change.Id);
+
+                    response.Results.Add(new PushChangeResult
+                    {
+                        ChangeId = change.Id,
+                        CommentId = change.CommentId,
+                        Outcome = "Accepted",
+                        Reason = "Previously processed before audit logging."
+                    });
+
+                    continue;
+                }
+
+                var incoming = snapshots[change.Id];
+                var stored = transaction
+                    .Find<PageComment>(change.CommentId);
+
+                string? beforeJson = stored is null
+                    ? null
+                    : JsonSerializer.Serialize(stored);
+
+                string? conflictReason =
+                    GetConflictReason(change, stored, transaction);
+
+                var received = existing ?? new ReceivedCommentChange
                 {
                     Id = change.Id,
                     CommentId = change.CommentId,
                     Operation = change.Operation,
+                    BaseVersion = change.BaseVersion,
+                    PreviousChangeId = change.PreviousChangeId,
                     ChangedAt = change.ChangedAt,
                     SnapshotJson = change.SnapshotJson,
                     ReceivedAt = DateTime.UtcNow
                 };
 
-                transaction.Insert(received);
+                if (existing is null)
+                    transaction.Insert(received);
 
-                var storedComment = transaction.Find<PageComment>(comment.Id);
+                var audit = new CommentAuditEntry
+                {
+                    ChangeId = change.Id,
+                    CommentId = change.CommentId,
+                    Operation = change.Operation,
+                    BaseVersion = change.BaseVersion,
+                    ServerVersionBefore = stored?.Version,
+                    IncomingSnapshotJson = change.SnapshotJson,
+                    ServerSnapshotBeforeJson = beforeJson,
+                    RecordedAtUtc = DateTime.UtcNow
+                };
 
-                if (storedComment is null)
-                    transaction.Insert(comment);
+                if (conflictReason is not null)
+                {
+                    // Keep the current server comment unchanged.
+                    audit.Outcome = "Conflict";
+                    audit.Reason = conflictReason;
+                    audit.ServerVersionAfter = stored?.Version;
+                }
                 else
-                    transaction.Update(comment);
+                {
+                    // The server owns the version number.
+                    incoming.Version = checked((stored?.Version ?? 0) + 1);
 
-                received.ProcessedAt = DateTime.UtcNow;
-                transaction.Update(received);
+                    if (stored is null)
+                        transaction.Insert(incoming);
+                    else
+                        transaction.Update(incoming);
 
-                processedIds.Add(change.Id);
+                    received.ProcessedAt = DateTime.UtcNow;
+                    transaction.Update(received);
+
+                    audit.Outcome = "Accepted";
+                    audit.Reason = "Change accepted.";
+                    audit.ServerVersionAfter = incoming.Version;
+                }
+
+                // Save the outcome in the same transaction as the change.
+                transaction.Insert(audit);
+                AddAuditResult(response, audit);
             }
         });
 
-        return Ok(new { processedChangeIds = processedIds });
+        return Ok(response);
+    }
+
+    private static string? GetConflictReason(
+        ReceivedCommentChange change,
+        PageComment? stored,
+        SQLite.SQLiteConnection transaction)
+    {
+        if (change.Operation == "Create")
+        {
+            if (stored is not null)
+                return "A comment with this ID already exists.";
+
+            // Legacy creates are safe when the ID does not exist.
+            if (change.BaseVersion is not null &&
+                change.BaseVersion != 0)
+            {
+                return "A new comment must start at version zero.";
+            }
+
+            return null;
+        }
+
+        if (stored is null)
+            return "The comment no longer exists on the server.";
+
+        int? expectedVersion = change.BaseVersion;
+
+        if (!string.IsNullOrWhiteSpace(change.PreviousChangeId))
+        {
+            var previous = transaction.Table<CommentAuditEntry>()
+                .Where(entry => entry.ChangeId == change.PreviousChangeId && entry.Outcome == "Accepted")
+                .FirstOrDefault();
+
+            if (previous is null || previous.CommentId != change.CommentId ||
+                previous.Outcome != "Accepted" || previous.ServerVersionAfter is null)
+            {
+                return "The previous local edit was not accepted. Review this comment.";
+            }
+
+            // Consecutive offline edits follow the version accepted for their predecessor.
+            expectedVersion = previous.ServerVersionAfter;
+        }
+
+        if (expectedVersion is null)
+        {
+            return "This older change has no base version " +
+                   "and requires review.";
+        }
+
+        if (expectedVersion != stored.Version)
+        {
+            return $"This edit used version {expectedVersion}, " +
+                   $"but the server has version {stored.Version}.";
+        }
+
+        if (stored.IsDeleted)
+            return "The comment has already been deleted on the server.";
+
+        return null;
+    }
+
+    private static void AddAuditResult(
+        PushChangesResponse response,
+        CommentAuditEntry audit)
+    {
+        PageComment? serverComment = null;
+
+        if (audit.Outcome == "Accepted")
+        {
+            serverComment = JsonSerializer.Deserialize<PageComment>(
+                audit.IncomingSnapshotJson);
+
+            if (serverComment is not null &&
+                audit.ServerVersionAfter is int version)
+            {
+                serverComment.Version = version;
+            }
+
+            response.ProcessedChangeIds.Add(audit.ChangeId);
+        }
+        else if (audit.ServerSnapshotBeforeJson is not null)
+        {
+            serverComment = JsonSerializer.Deserialize<PageComment>(
+                audit.ServerSnapshotBeforeJson);
+        }
+
+        response.Results.Add(new PushChangeResult
+        {
+            ChangeId = audit.ChangeId,
+            CommentId = audit.CommentId,
+            Outcome = audit.Outcome,
+            Reason = audit.Reason,
+            ServerComment = serverComment,
+            AuditEntry = audit
+        });
     }
 }

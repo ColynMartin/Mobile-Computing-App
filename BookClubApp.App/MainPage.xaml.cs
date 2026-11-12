@@ -8,6 +8,7 @@ public partial class MainPage : ContentPage
 {
     private readonly CommentDatabase database;
     private bool busy;
+    private readonly SemaphoreSlim operationLock = new(1, 1);
 
     private const string SampleBookId = "sample-book";
     private const int SamplePageNumber = 1;
@@ -153,6 +154,8 @@ public partial class MainPage : ContentPage
 
         BindableLayout.SetItemsSource(CommentsLayout, comments);
 
+        await LoadConflictsAsync();
+
         StatusLabel.Text = comments.Count == 0
             ? "No saved comments on this page yet."
             : $"Comments saved on this device: {comments.Count}";
@@ -241,14 +244,21 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
             return;
 
         busy = true;
-        SaveButton.IsEnabled = false;
-        ReloadButton.IsEnabled = false;
-        DownloadButton.IsEnabled = false;
-        ApplyButton.IsEnabled = false;
-        CommentEditor.IsEnabled = false;
+        bool lockTaken = false;
 
         try
         {
+            SaveButton.IsEnabled = false;
+            ReloadButton.IsEnabled = false;
+            DownloadButton.IsEnabled = false;
+            ApplyButton.IsEnabled = false;
+            SyncButton.IsEnabled = false;
+            ConflictsLayout.IsEnabled = false;
+            CommentsLayout.IsEnabled = false;
+            CommentEditor.IsEnabled = false;
+
+            await operationLock.WaitAsync();
+            lockTaken = true;
             await operation();
         }
         catch (Exception ex)
@@ -257,20 +267,64 @@ private async void OnDeleteClicked(object? sender, EventArgs e)
         }
         finally
         {
+            if (lockTaken)
+                operationLock.Release();
+
             busy = false;
             SaveButton.IsEnabled = true;
             ReloadButton.IsEnabled = true;
             DownloadButton.IsEnabled = true;
             ApplyButton.IsEnabled = true;
+            SyncButton.IsEnabled = true;
+            ConflictsLayout.IsEnabled = true;
+            CommentsLayout.IsEnabled = true;
             CommentEditor.IsEnabled = true;
         }
     }
 
     private async Task RunAutomaticSyncAsync(CancellationToken token)
     {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         try
         {
-            await pushSyncService.StartAutomaticSyncAsync(token);
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                if (busy)
+                    continue;
+
+                bool lockTaken = await operationLock.WaitAsync(0, token);
+
+                if (!lockTaken)
+                    continue;
+
+                try
+                {
+                    int sent = await pushSyncService.PushChangesAsync(token);
+                    token.ThrowIfCancellationRequested();
+
+                    if (!busy)
+                    {
+                        await LoadConflictsAsync();
+
+                        if (sent > 0)
+                            StatusLabel.Text = $"Automatically synced changes: {sent}.";
+                    }
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    // Synchronization stopped when leaving the page.
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    if (!busy && !token.IsCancellationRequested)
+                        StatusLabel.Text = $"Automatic sync failed: {ex.Message}";
+                }
+                finally
+                {
+                    operationLock.Release();
+                }
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {

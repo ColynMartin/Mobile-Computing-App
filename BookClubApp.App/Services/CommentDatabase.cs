@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace BookClubApp.App.Services;
 
-public class CommentDatabase
+public partial class CommentDatabase
 {
     private readonly Lazy<Task<SQLiteAsyncConnection>> database =
         new(CreateDatabaseAsync);
@@ -22,10 +22,20 @@ public class CommentDatabase
         await connection.CreateTableAsync<CommentChange>();
         await connection.CreateTableAsync<IncomingComment>();
         await connection.CreateTableAsync<PullSyncState>();
+        await connection.CreateTableAsync<CommentAuditEntry>();
+        await connection.CreateTableAsync<SyncedAuditEntry>();
+        await connection.CreateTableAsync<CommentConflict>();
 
         // Keep older comments visible after adding IsDeleted.
         await connection.ExecuteAsync(
             "UPDATE PageComment SET IsDeleted = 0 WHERE IsDeleted IS NULL");
+
+        // Initialize the version field for existing local records.
+        await connection.ExecuteAsync(
+            "UPDATE PageComment SET Version = 0 WHERE Version IS NULL");
+
+        await connection.ExecuteAsync(
+            "UPDATE CommentChange SET IsSuperseded = 0 WHERE IsSuperseded IS NULL");
 
         return connection;
     }
@@ -134,6 +144,16 @@ public class CommentDatabase
             .ToListAsync();
     }
 
+    public async Task<List<CommentChange>> GetPendingChangesAsync()
+    {
+        var connection = await database.Value;
+
+        // Send dependent edits in the order they were saved on this device.
+        return await connection.QueryAsync<CommentChange>(
+            "SELECT * FROM CommentChange " +
+            "WHERE IsSynced = 0 AND IsSuperseded = 0 ORDER BY rowid");
+    }
+
     // Mark changes as synced after the server confirms them.
     public async Task MarkChangesSyncedAsync(List<string> changeIds)
     {
@@ -211,7 +231,8 @@ public class CommentDatabase
                 bool hasPendingChanges = transaction.Table<CommentChange>()
                     .Where(change =>
                         change.CommentId == comment.Id &&
-                        change.IsSynced == false)
+                        change.IsSynced == false &&
+                        change.IsSuperseded == false)
                     .Count() > 0;
 
                 if (hasPendingChanges)
@@ -277,7 +298,8 @@ public class CommentDatabase
                 bool hasPendingChanges = transaction.Table<CommentChange>()
                     .Where(change =>
                         change.CommentId == item.CommentId &&
-                        change.IsSynced == false)
+                        change.IsSynced == false &&
+                        change.IsSuperseded == false)
                     .Count() > 0;
 
                 if (hasPendingChanges ||
@@ -325,10 +347,25 @@ public class CommentDatabase
         PageComment comment,
         string operation)
     {
+        // Find the most recently queued, unsynced edit for this comment.
+        // Database insertion order avoids relying on the device clock.
+        var previousChange = connection.Query<CommentChange>(
+            """
+            SELECT *
+            FROM CommentChange
+            WHERE CommentId = ? AND IsSynced = 0 AND IsSuperseded = 0
+            ORDER BY rowid DESC
+            LIMIT 1
+            """,
+            comment.Id)
+            .FirstOrDefault();
+
         var change = new CommentChange
         {
             CommentId = comment.Id,
             Operation = operation,
+            BaseVersion = comment.Version,
+            PreviousChangeId = previousChange?.Id,
             ChangedAt = comment.UpdatedAt,
             SnapshotJson = JsonSerializer.Serialize(comment),
             IsSynced = false

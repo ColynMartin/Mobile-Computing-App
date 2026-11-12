@@ -197,3 +197,167 @@ Deleted comments are synchronized using the IsDeleted flag rather than permanent
 The server returned two deleted comments along with the active comment. These records were successfully transferred to the local database.
 
 Deleted comments remain stored for synchronization purposes but are excluded from the visible discussion.
+
+## Week 5 - Conflict Handling & Audit Trail
+
+- [x] Conflict strategy working
+- [x] Audit logging on device
+- [x] Audit logging synced to server
+- [x] Add sync button and automatic sync
+- [x] Automatic sync attempt both (online and offline)
+- [ ] Submit rendered README.md and zipped .git files
+
+### Week 5 Progress
+
+The app now detects conflicts when two devices edit the same comment. Users can review both versions and choose which one they want to keep.
+
+Testing was completed with two Android emulators connected to the same local API:
+
+- Device A: MAUI_Emulator_API_37, emulator-5554
+- Device B: my_pixel_36, emulator-5556
+
+The tests used the same comment on both devices. The API was stopped while edits were made, then restarted so the saved changes could synchronize.
+
+### Conflict Handling
+
+Each server comment has a Version value. An edit includes the version it was based on.
+
+When the server receives an edit based on an older version, it records a conflict instead of immediately replacing the current comment. The app displays the device and server versions for review.
+
+Users have two choices:
+
+- Keep my version: Save the device's edit as a pending change using the reviewed server version. The server checks it again before accepting it.
+- Keep server version: Replace the local comment with the reviewed server version and resolve the pending conflict.
+
+### Test 1 - Keep My Version
+
+Both devices started with version 1 of the comment. While the API was stopped, each device saved a different edit.
+
+Device A synchronized first. Its edit became version 2 on the server.
+
+When Device B synchronized, its edit was still based on version 1. The app displayed a conflict showing Device B's text and the server's Device A text.
+
+![Device B Detects a conflict between its version 1 edit and server version 2](<docs/week5/Two Devices Conflict Detected.png>)
+
+On Device B, Keep my version was selected. The app sent the device's edit again using server version 2, and it was accepted as version 3.
+
+After Device A synchronized, both devices displayed "Week 5 Conflict Test (Device B)" with no unresolved conflicts.
+
+![Both devices show the Device B comment after keeping the device version](<docs/week5/Keep My Version Both Devices.png>)
+
+The server database confirmed that the comment contained Device B's text, had Version = 3, and remained active with IsDeleted = 0.
+
+![Server comment after the Keep my version test](<docs/week5/Keep My Version Server Result.png>)
+
+### Test 2 - Keep Server Version
+
+Both devices then started with version 3 of the comment.
+
+While the API was stopped, Device A saved two edits, including a correction to the device letter in the comment. Device B saved a different edit.
+
+Device A synchronized first. Its two accepted edits changed the server comment from version 3 to version 5.
+
+When Device B synchronized, the app detected that its edit used version 3 while the server had version 5.
+
+![Device B detects a conflict between its version 3 edit and server version 5](<docs/week5/Keep Server Conflict Detected.png>)
+
+On Device B, Keep server version was selected. Both devices then displayed "Week 5 Conflict Test (Device A)x2" with no unresolved conflicts.
+
+![Both devices show the server comment after keeping the server version](<docs/week5/Keep Server Both Devices.png>)
+
+The server comment remained at version 5. Keeping the server version didn't create another server comment update.
+
+![Server comment remains at version 5 after keeping the server version](<docs/week5/Keep Server Server Results.png>)
+
+### Audit Logging
+
+The CommentAuditEntry table records what happened during synchronization and conflict resolution.
+
+Each entry includes:
+
+- A unique audit ID
+- The change ID and comment ID
+- The operation, outcome, and reason
+- The version the edit was based on
+- The server version before and after processing
+- JSON snapshots containing the incoming comment and the server comment when available
+- The UTC time the entry was recorded
+
+Audit entries remain stored as history. Later actions create new entries instead of replacing earlier audit records.
+
+The server audit from the first conflict test shows:
+
+1. The original comment was created as version 1
+2. Device A's update was accepted as version 2
+3. Device B's older update produced a conflict
+4. Device B's edit was sent again and accepted as version 3
+
+![Server audit showing creation, an accepted edit, a conflict, and the accepted retry](<docs/week5/Keep My Version Server Audit.png>)
+
+The device audit includes both resolution decisions:
+
+- Keep the device version
+- Keep the server version
+
+These entries record which version the user chose to keep. A Keep my version decision is followed by a separate accepted update when its pending edit reaches the server.
+
+![Device audit containing both conflict and resolution decisions](<docs/week5/Keep Server Device Audit.png>)
+
+### Synchronizing Resolution Audits to the Server
+
+Testing showed that resolution decisions were being saved on the device but were not reaching the server.
+
+A /pushAuditEntries endpoint and device upload tracking were added so these decisions could also be stored in the server audit history.
+
+The app sends resolution audit entries that the server has not yet confirmed receiving. Uploading these entries keeps their original IDs, timestamps, snapshots, and version information.
+
+The server screenshot below shows both resolution decisions received from Device B.
+
+![Server audit contains both uploaded resolution decisions](<docs/week5/Resolution Audits Synced To Server.png>)
+
+A separate SyncedAuditEntry table records which audit entries the server has confirmed receiving. This records which entries were uploaded without changing the original audit records.
+
+A fresh copy of Device B's database confirmed that both resolution entries were marked as synchronized to the server.
+
+![Both device resolution audit entries are marked as synchronized to the server](<docs/week5/Device Audit Upload Confirmed.png>)
+
+### Automatic Sync While the Server Is Unavailable
+
+While the discussion page is open, the app attempts to upload pending changes every 10 seconds.
+
+With the API stopped, both devices saved different edits locally. The automatic sync attempts reported connection failures, but the edited comments remained visible on each device.
+
+![Both devices retain their local edits while automatic sync cannot reach the server](<docs/week5/Two Devices Offline Edits.png>)
+
+### Automatic Sync After Reconnecting
+
+After the API was restarted, Device A automatically uploaded its pending edit.
+
+The app displayed "Automatically synced changes: 1." Device B's app was kept closed during this step so Device A's edit reached the server first.
+
+![Device A automatically synchronizes its pending edit after the API restarts](<docs/week5/Device A Synced First.png>)
+
+### Manual Sync
+
+The Sync now button allows users to start synchronization themselves. It sends pending changes and downloads and applies server changes when there are no unresolved conflicts.
+
+During the second conflict test, Device A manually synchronized its two pending edits. The app reported "Sent changes: 2. Applied comments: 1."
+
+![Device A manually synchronizes its two pending edits](<docs/week5/Manual Sync Pending Edits.png>)
+
+### Additional Fixes and Verification
+
+The automatic sync process was updated so it would not keep disabling the comment editor while the user was typing.
+
+A PeriodicTimer checks for pending changes every 10 seconds while the discussion page is open. The checks stop when the user leaves the page. Manual and automatic sync operations wait for each other to finish before starting.
+
+The completed tests verified:
+
+- Local edits remain available when the API is stopped
+- Automatic synchronization uploads pending changes after reconnection
+- Manual synchronization sends pending edits
+- Conflicting edits are displayed for review
+- Keep my version and Keep server version both resolve the tested conflicts
+- Both devices can display the same final comment after synchronization
+- Resolution decisions remain stored on the device and are uploaded to the server
+- The device records when the server confirms receiving the resolution audit entries

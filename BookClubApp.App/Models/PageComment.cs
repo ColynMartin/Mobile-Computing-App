@@ -25,4 +25,7 @@ public class PageComment
 
     // Keep a deletion record for future synchronization.
     public bool IsDeleted { get; set; } = false;
+
+    // Server version used to detect conflicting edits.
+    public int Version { get; set; } = 0;
 }
